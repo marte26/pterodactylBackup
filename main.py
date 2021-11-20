@@ -4,6 +4,9 @@ import requests
 
 import secrets
 
+CLIENT_URL = secrets.BASE_URL + "/api/client/servers/"
+ADMIN_URL  = secrets.BASE_URL + "/api/application/"
+
 CLIENT_HEADERS = {
     "Authorization": "Bearer " + secrets.CLIENT_KEY,
     "Accept": "application/json",
@@ -18,7 +21,7 @@ ADMIN_HEADERS = {
 
 
 def get_backups(serverid):
-    url = secrets.CLIENT_URL + serverid + '/backups'
+    url = CLIENT_URL + serverid + '/backups'
 
     response = requests.get(url, headers=CLIENT_HEADERS).json()
 
@@ -26,13 +29,13 @@ def get_backups(serverid):
 
 
 def delete_backup(serverid, backupuuid):
-    url = secrets.CLIENT_URL + serverid + '/backups/' + backupuuid
+    url = CLIENT_URL + serverid + '/backups/' + backupuuid
 
     requests.delete(url, headers=CLIENT_HEADERS)
 
 
 def create_backup(serverid):
-    url = secrets.CLIENT_URL + serverid + '/backups'
+    url = CLIENT_URL + serverid + '/backups'
 
     response = requests.post(url=url, headers=CLIENT_HEADERS).json()
 
@@ -40,7 +43,7 @@ def create_backup(serverid):
 
 
 def isbackupfinished(serverid, backupuuid):
-    url = secrets.CLIENT_URL + serverid + '/backups/' + backupuuid
+    url = CLIENT_URL + serverid + '/backups/' + backupuuid
 
     response = requests.get(url, headers=CLIENT_HEADERS).json()
 
@@ -66,7 +69,7 @@ def make_backups(servers):
 
 
 def get_servers():
-    response = requests.get(secrets.ADMIN_URL, headers=ADMIN_HEADERS).json()
+    response = requests.get(ADMIN_URL + "servers", headers=ADMIN_HEADERS).json()
 
     serverlistraw = response['data']
     servercount = response['meta']['pagination']['total']
