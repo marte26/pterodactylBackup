@@ -5,16 +5,10 @@ import requests
 import secrets
 
 CLIENT_URL = secrets.BASE_URL + "/api/client/servers/"
-ADMIN_URL  = secrets.BASE_URL + "/api/application/"
+ADMIN_URL = secrets.BASE_URL + "/api/application/"
 
-CLIENT_HEADERS = {
+HEADERS = {
     "Authorization": "Bearer " + secrets.CLIENT_KEY,
-    "Accept": "application/json",
-    "Content-Type": "application/json"
-}
-
-ADMIN_HEADERS = {
-    "Authorization": "Bearer " + secrets.ADMIN_KEY,
     "Accept": "application/json",
     "Content-Type": "application/json"
 }
@@ -23,7 +17,7 @@ ADMIN_HEADERS = {
 def get_backups(serverid):
     url = CLIENT_URL + serverid + '/backups'
 
-    response = requests.get(url, headers=CLIENT_HEADERS).json()
+    response = requests.get(url, headers=HEADERS).json()
 
     return response
 
@@ -31,13 +25,13 @@ def get_backups(serverid):
 def delete_backup(serverid, backupuuid):
     url = CLIENT_URL + serverid + '/backups/' + backupuuid
 
-    requests.delete(url, headers=CLIENT_HEADERS)
+    requests.delete(url, headers=HEADERS)
 
 
 def create_backup(serverid):
     url = CLIENT_URL + serverid + '/backups'
 
-    response = requests.post(url=url, headers=CLIENT_HEADERS).json()
+    response = requests.post(url=url, headers=HEADERS).json()
 
     return response['attributes']['uuid']
 
@@ -45,7 +39,7 @@ def create_backup(serverid):
 def isbackupfinished(serverid, backupuuid):
     url = CLIENT_URL + serverid + '/backups/' + backupuuid
 
-    response = requests.get(url, headers=CLIENT_HEADERS).json()
+    response = requests.get(url, headers=HEADERS).json()
 
     return response['attributes']['completed_at']
 
@@ -57,7 +51,8 @@ def make_backups(servers):
             continue
 
         if get_backups(i['identifier'])['meta']['pagination']['total'] >= i['feature_limits']['backups']:
-            oldest_backup = get_backups(i['identifier'])['data'][0]['attributes']['uuid']
+            oldest_backup = get_backups(i['identifier'])[
+                'data'][0]['attributes']['uuid']
             delete_backup(i['identifier'], oldest_backup)
 
         logging.info("Creating backup of " + i['name'])
@@ -69,7 +64,8 @@ def make_backups(servers):
 
 
 def get_servers():
-    response = requests.get(ADMIN_URL + "servers", headers=ADMIN_HEADERS).json()
+    response = requests.get(ADMIN_URL + "servers",
+                            headers=HEADERS).json()
 
     serverlistraw = response['data']
     servercount = response['meta']['pagination']['total']
