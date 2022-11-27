@@ -8,7 +8,7 @@ CLIENT_URL = secrets.BASE_URL + "/api/client/servers/"
 ADMIN_URL = secrets.BASE_URL + "/api/application/"
 
 HEADERS = {
-    "Authorization": "Bearer " + secrets.CLIENT_KEY,
+    "Authorization": "Bearer " + secrets.API_KEY,
     "Accept": "application/json",
     "Content-Type": "application/json"
 }
