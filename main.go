@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/marte26/pterodactyl-backup/pterodactyl_api/pterodactyl_api_admin"
-	"github.com/spf13/viper"
 	"log"
+
+	"github.com/marte26/pterodactyl-backup/pterodactylApi/pterodactylAdminApi"
+
+	"github.com/spf13/viper"
 )
 
 type Config struct {
@@ -35,8 +37,8 @@ func main() {
 		log.Fatal("cannot load config: ", err)
 	}
 
-	adminApi := pterodactyl_api_admin.Client{
-		URL:    config.BaseUrl + "/api/application",
+	adminApi := pterodactylAdminApi.Client{
+		URL:    config.BaseUrl,
 		ApiKey: config.ApiKey,
 	}
 
