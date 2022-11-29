@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/marte26/pterodactyl-backup/pterodactylApi/pterodactylAdminApi"
+	"github.com/marte26/pterodactylBackup/pterodactylApi/pterodactylAdminApi"
 
 	"github.com/spf13/viper"
 )

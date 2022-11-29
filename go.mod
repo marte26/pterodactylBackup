@@ -1,4 +1,4 @@
-module github.com/marte26/pterodactyl-backup
+module github.com/marte26/pterodactylBackup
 
 go 1.19
 
