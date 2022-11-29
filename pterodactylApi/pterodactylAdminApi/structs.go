@@ -1,4 +1,4 @@
-package pterodactyl_api_admin
+package pterodactylAdminApi
 
 import "time"
 

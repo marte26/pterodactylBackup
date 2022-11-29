@@ -1,4 +1,4 @@
-package pterodactyl_api_admin
+package pterodactylAdminApi
 
 import (
 	"encoding/json"
@@ -16,10 +16,16 @@ func (c *Client) addHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 }
 
+func (c *Client) httpRequest(method string, path string) (*http.Request, error) {
+	adminPath := "/api/application"
+
+	return http.NewRequest(method, c.URL+adminPath+path, nil)
+}
+
 func (c *Client) GetServers() ([]Server, error) {
 	httpClient := &http.Client{}
 
-	req, err := http.NewRequest("GET", c.URL+"/servers", nil)
+	req, err := c.httpRequest("GET", "/servers")
 	if err != nil {
 		return nil, err
 	}
