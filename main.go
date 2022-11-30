@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/marte26/pterodactylBackup/pterodactylApi/pterodactylAdminApi"
+	"github.com/marte26/pterodactylBackup/pterodactylapi/pterodactyladminapi"
 
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	ApiKey  string `mapstructure:"API_KEY"`
-	BaseUrl string `mapstructure:"BASE_URL"`
+	APIKey  string `mapstructure:"API_KEY"`
+	BaseURL string `mapstructure:"BASE_URL"`
 }
 
 func loadEnv(path string) (config Config, err error) {
@@ -37,12 +37,12 @@ func main() {
 		log.Fatal("cannot load config: ", err)
 	}
 
-	adminApi := pterodactylAdminApi.Client{
-		URL:    config.BaseUrl,
-		ApiKey: config.ApiKey,
+	adminAPI := pterodactyladminapi.Client{
+		URL:    config.BaseURL,
+		APIKey: config.APIKey,
 	}
 
-	servers, err := adminApi.GetServers()
+	servers, err := adminAPI.GetServers()
 	if err != nil {
 		log.Fatal("cannot get servers:", err)
 	}

@@ -1,4 +1,4 @@
-package pterodactylAdminApi
+package pterodactyladminapi
 
 import (
 	"encoding/json"
@@ -8,11 +8,11 @@ import (
 
 type Client struct {
 	URL    string
-	ApiKey string
+	APIKey string
 }
 
 func (c *Client) addHeaders(req *http.Request) {
-	req.Header.Set("Authorization", "Bearer "+c.ApiKey)
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Accept", "application/json")
 }
 
@@ -23,15 +23,14 @@ func (c *Client) httpRequest(method string, path string) (*http.Request, error) 
 }
 
 func (c *Client) GetServers() ([]Server, error) {
-	httpClient := &http.Client{}
-
 	req, err := c.httpRequest("GET", "/servers")
 	if err != nil {
 		return nil, err
 	}
+
 	c.addHeaders(req)
 
-	resp, err := httpClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -50,9 +49,17 @@ func (c *Client) GetServers() ([]Server, error) {
 
 	var servers []Server
 
-	temp, _ := json.Marshal(response.Data)
+	temp, err := json.Marshal(response.Data)
+	if err != nil {
+		return nil, err
+	}
 
-	json.Unmarshal(temp, &servers)
+	err = json.Unmarshal(temp, &servers)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = resp.Close
 
 	return servers, nil
 }
