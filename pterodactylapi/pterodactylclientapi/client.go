@@ -1,9 +1,10 @@
-package pterodactyladminapi
+package pterodactylclientapi
 
 import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 type Client struct {
@@ -12,9 +13,9 @@ type Client struct {
 }
 
 func (c *Client) httpRequest(method string, path string) ([]byte, error) {
-	adminPath := "/api/application"
+	clientPath := "/api/client"
 
-	req, err := http.NewRequest(method, c.URL+adminPath+path, nil)
+	req, err := http.NewRequest(method, c.URL+clientPath+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -37,8 +38,8 @@ func (c *Client) httpRequest(method string, path string) ([]byte, error) {
 	return body, nil
 }
 
-func (c *Client) GetServers() ([]Server, error) {
-	body, err := c.httpRequest("GET", "/servers")
+func (c *Client) GetFiles(ID string, path string) ([]File, error) {
+	body, err := c.httpRequest("GET", "/servers/"+ID+"/files/list?directory="+url.QueryEscape(path))
 	if err != nil {
 		return nil, err
 	}
@@ -50,17 +51,17 @@ func (c *Client) GetServers() ([]Server, error) {
 		return nil, err
 	}
 
-	var servers []Server
+	var files []File
 
 	temp, err := json.Marshal(response.Data)
 	if err != nil {
 		return nil, err
 	}
 
-	err = json.Unmarshal(temp, &servers)
+	err = json.Unmarshal(temp, &files)
 	if err != nil {
 		return nil, err
 	}
 
-	return servers, nil
+	return files, nil
 }

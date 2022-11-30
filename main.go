@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 
 	"github.com/marte26/pterodactylBackup/pterodactylapi/pterodactyladminapi"
+	"github.com/marte26/pterodactylBackup/pterodactylapi/pterodactylclientapi"
 
 	"github.com/spf13/viper"
 )
@@ -41,11 +43,23 @@ func main() {
 		URL:    config.BaseURL,
 		APIKey: config.APIKey,
 	}
+	clientAPI := pterodactylclientapi.Client{
+		URL:    config.BaseURL,
+		APIKey: config.APIKey,
+	}
 
 	servers, err := adminAPI.GetServers()
 	if err != nil {
 		log.Fatal("cannot get servers:", err)
 	}
 
-	fmt.Println(servers)
+	files, err := clientAPI.GetFiles(servers[0].Attributes.Identifier, "/world")
+
+	printJson(files)
+}
+
+func printJson(s any) {
+	jsonIndent, _ := json.MarshalIndent(s, "", "    ")
+
+	fmt.Println(string(jsonIndent))
 }
