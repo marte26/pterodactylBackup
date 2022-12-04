@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/marte26/pterodactylBackup/pterodactylapi/adminapi"
 	"github.com/marte26/pterodactylBackup/pterodactylapi/clientapi"
@@ -35,7 +37,12 @@ func loadEnv(path string) (config Config, err error) {
 }
 
 func main() {
-	config, err := loadEnv(".")
+	exPath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("cannot get executable path: %v", err)
+	}
+
+	config, err := loadEnv(filepath.Dir(exPath))
 	if err != nil {
 		log.Fatal("cannot load config: ", err)
 	}
