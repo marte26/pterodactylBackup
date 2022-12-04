@@ -1,4 +1,4 @@
-package pterodactyladminapi
+package structs
 
 import "time"
 
@@ -47,5 +47,31 @@ type Server struct {
 		Egg        int       `json:"egg"`
 		UpdatedAt  time.Time `json:"updated_at"`
 		CreatedAt  time.Time `json:"created_at"`
+	} `json:"attributes"`
+}
+
+type File struct {
+	Attributes struct {
+		Name       string    `json:"name"`
+		Mode       string    `json:"mode"`
+		ModeBits   string    `json:"mode_bits"`
+		Size       int       `json:"size"`
+		IsFile     bool      `json:"is_file"`
+		IsSymlink  bool      `json:"is_symlink"`
+		Mimetype   string    `json:"mimetype"`
+		CreatedAt  time.Time `json:"created_at"`
+		ModifiedAt time.Time `json:"modified_at"`
+	} `json:"attributes"`
+}
+
+type Backup struct {
+	Attributes struct {
+		UUID         string    `json:"uuid"`
+		Name         string    `json:"name"`
+		IgnoredFiles []string  `json:"ignored_files"`
+		Sha256Hash   string    `json:"sha256_hash"`
+		Bytes        int       `json:"bytes"`
+		CreatedAt    time.Time `json:"created_at"`
+		CompletedAt  time.Time `json:"completed_at"`
 	} `json:"attributes"`
 }
