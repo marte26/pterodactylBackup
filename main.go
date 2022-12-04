@@ -89,6 +89,7 @@ func createBackup(clientAPI clientapi.Client, server structs.Server) {
 	log.Printf("creating backup %v for server %v", response.Attributes.UUID, server.Attributes.Name)
 }
 
+// debug function
 func printJSON(s any) {
 	jsonIndent, _ := json.MarshalIndent(s, "", "    ")
 
