@@ -19,18 +19,21 @@ type Meta struct {
 }
 
 type Server struct {
+	Object     string `json:"object"`
 	Attributes struct {
 		ID          int    `json:"id"`
+		ExternalID  int    `json:"external_id"`
 		UUID        string `json:"uuid"`
 		Identifier  string `json:"identifier"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		Status      string `json:"status"`
 		Suspended   bool   `json:"suspended"`
 		Limits      struct {
 			Memory      int  `json:"memory"`
 			Swap        int  `json:"swap"`
 			Disk        int  `json:"disk"`
-			Io          int  `json:"io"`
+			IO          int  `json:"io"`
 			CPU         int  `json:"cpu"`
 			Threads     int  `json:"threads"`
 			OomDisabled bool `json:"oom_disabled"`
@@ -40,13 +43,19 @@ type Server struct {
 			Allocations int `json:"allocations"`
 			Backups     int `json:"backups"`
 		} `json:"feature_limits"`
-		User       int       `json:"user"`
-		Node       int       `json:"node"`
-		Allocation int       `json:"allocation"`
-		Nest       int       `json:"nest"`
-		Egg        int       `json:"egg"`
-		UpdatedAt  time.Time `json:"updated_at"`
-		CreatedAt  time.Time `json:"created_at"`
+		User       int `json:"user"`
+		Node       int `json:"node"`
+		Allocation int `json:"allocation"`
+		Nest       int `json:"nest"`
+		Egg        int `json:"egg"`
+		Container  struct {
+			StartupCommand string                 `json:"startup_command"`
+			Image          string                 `json:"image"`
+			Installed      int                    `json:"installed"`
+			Environment    map[string]interface{} `json:"environment"`
+		} `json:"container"`
+		UpdatedAt time.Time `json:"updated_at"`
+		CreatedAt time.Time `json:"created_at"`
 	} `json:"attributes"`
 }
 
