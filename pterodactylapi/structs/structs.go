@@ -76,9 +76,11 @@ type File struct {
 type Backup struct {
 	Attributes struct {
 		UUID         string    `json:"uuid"`
+		IsSuccessful bool      `json:"is_successful"`
+		IsLocked     bool      `json:"is_locked"`
 		Name         string    `json:"name"`
 		IgnoredFiles []string  `json:"ignored_files"`
-		Sha256Hash   string    `json:"sha256_hash"`
+		Checksum     string    `json:"checksum"`
 		Bytes        int       `json:"bytes"`
 		CreatedAt    time.Time `json:"created_at"`
 		CompletedAt  time.Time `json:"completed_at"`
