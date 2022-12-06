@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/marte26/pterodactylBackup/pterodactylapi/adminapi"
 	"github.com/marte26/pterodactylBackup/pterodactylapi/clientapi"
@@ -33,6 +34,7 @@ func loadEnv(path string) (config Config, err error) {
 	}
 
 	err = viper.Unmarshal(&config)
+
 	return
 }
 
@@ -61,39 +63,47 @@ func main() {
 		log.Fatalf("cannot get servers: %v", err)
 	}
 
-	for _, server := range servers {
-		createBackup(clientAPI, server)
+	createBackupBatch(&clientAPI, servers, 2)
+}
+
+func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs.Server) {
+	for server := range serverChan {
+		backup, err := clientAPI.CreateBackup(server.Attributes.Identifier, true)
+		if err != nil {
+			log.Printf("worker %v: cannot create backup for server %v: %v", id, server.Attributes.Name, err)
+		}
+
+		for range time.Tick(time.Second * 5) {
+			backupDetails, err := clientAPI.GetBackupDetails(server.Attributes.Identifier, backup.Attributes.UUID)
+			if err != nil {
+				log.Printf("worker %v: cannot get backup %v details for server %v", id, backup.Attributes.UUID, server.Attributes.Name)
+				return
+			}
+
+			if backupDetails.Attributes.Checksum != "" {
+				log.Printf("worker %v: backup %v for server %v completed", id, backupDetails.Attributes.UUID, server.Attributes.Name)
+				break
+			}
+		}
 	}
 }
 
-func createBackup(clientAPI clientapi.Client, server structs.Server) {
-	if server.Attributes.FeatureLimits.Backups == 0 {
-		log.Printf("backups for server %v not allowed, skipping", server.Attributes.Name)
-		return
+func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, batchSize int) {
+	serverChan := make(chan structs.Server)
+
+	for i := 0; i < batchSize; i++ {
+		go backupWorker(i, clientAPI, serverChan)
 	}
 
-	backups, err := clientAPI.GetBackups(server.Attributes.Identifier)
-	if err != nil {
-		log.Printf("cannot get backups for server %v: %v", server.Attributes.Name, err)
-		return
-	}
-
-	if len(backups) >= server.Attributes.FeatureLimits.Backups {
-		log.Printf("backup limit of %v reached, deleting oldest backup", server.Attributes.FeatureLimits.Backups)
-		err := clientAPI.DeleteBackup(server.Attributes.Identifier, backups[0].Attributes.UUID)
-		if err != nil {
-			log.Printf("cannot delete backup %v for server %v: %v", backups[0].Attributes.UUID, server.Attributes.Name, err)
-			return
+	for _, server := range servers {
+		if server.Attributes.FeatureLimits.Backups > 0 {
+			serverChan <- server
+		} else {
+			log.Printf("backups for server %v not allowed, skipping", server.Attributes.Name)
 		}
 	}
 
-	response, err := clientAPI.CreateBackup(server.Attributes.Identifier)
-	if err != nil {
-		log.Printf("cannot create backup for server %v: %v", server.Attributes.Name, err)
-		return
-	}
-
-	log.Printf("creating backup %v for server %v", response.Attributes.UUID, server.Attributes.Name)
+	close(serverChan)
 }
 
 // debug function
