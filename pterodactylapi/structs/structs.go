@@ -44,7 +44,6 @@ type Server struct {
 			Backups     int `json:"backups"`
 		} `json:"feature_limits"`
 		User       int `json:"user"`
-		Node       int `json:"node"`
 		Allocation int `json:"allocation"`
 		Nest       int `json:"nest"`
 		Egg        int `json:"egg"`
