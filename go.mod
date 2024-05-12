@@ -1,6 +1,6 @@
 module github.com/marte26/pterodactylBackup
 
-go 1.19
+go 1.22
 
 require github.com/spf13/viper v1.18.2
 
