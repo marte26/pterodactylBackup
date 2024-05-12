@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/marte26/pterodactylBackup/pterodactylapi/adminapi"
@@ -90,9 +91,17 @@ func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs
 
 func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, batchSize int) {
 	serverChan := make(chan structs.Server)
+	defer close(serverChan)
+
+	var wg sync.WaitGroup
 
 	for i := 0; i < batchSize; i++ {
-		go backupWorker(i, clientAPI, serverChan)
+		wg.Add(1)
+
+		go func(i int) {
+			defer wg.Done()
+			backupWorker(i, clientAPI, serverChan)
+		}(i)
 	}
 
 	for _, server := range servers {
@@ -102,8 +111,6 @@ func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, ba
 			log.Printf("backups for server %v not allowed, skipping", server.Attributes.Name)
 		}
 	}
-
-	close(serverChan)
 }
 
 // debug function
