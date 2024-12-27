@@ -110,6 +110,10 @@ func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, ba
 		}
 	}
 	close(serverChan)
+
+	log.Println("finished sending servers to workers, waiting for workers to finish")
+	wg.Wait()
+	log.Println("finished waiting for workers")
 }
 
 // debug function
