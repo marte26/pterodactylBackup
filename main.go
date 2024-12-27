@@ -16,6 +16,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+var commitHash = "unknown"
+
 type Config struct {
 	APIKey  string `mapstructure:"API_KEY"`
 	BaseURL string `mapstructure:"BASE_URL"`
@@ -40,6 +42,8 @@ func loadEnv(path string) (config Config, err error) {
 }
 
 func main() {
+	log.Printf("starting pterodactylBackup commit hash: %v", commitHash)
+
 	exPath, err := os.Executable()
 	if err != nil {
 		log.Fatalf("cannot get executable path: %v\n", err)
