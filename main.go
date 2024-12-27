@@ -91,8 +91,6 @@ func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs
 
 func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, batchSize int) {
 	serverChan := make(chan structs.Server)
-	defer close(serverChan)
-
 	var wg sync.WaitGroup
 
 	for i := 0; i < batchSize; i++ {
@@ -111,6 +109,7 @@ func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, ba
 			log.Printf("backups for server %v not allowed, skipping", server.Attributes.Name)
 		}
 	}
+	close(serverChan)
 }
 
 // debug function
