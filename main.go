@@ -42,12 +42,12 @@ func loadEnv(path string) (config Config, err error) {
 func main() {
 	exPath, err := os.Executable()
 	if err != nil {
-		log.Fatalf("cannot get executable path: %v", err)
+		log.Fatalf("cannot get executable path: %v\n", err)
 	}
 
 	config, err := loadEnv(filepath.Dir(exPath))
 	if err != nil {
-		log.Fatal("cannot load config: ", err)
+		log.Fatalf("cannot load config: %v\n", err)
 	}
 
 	adminAPI := adminapi.Client{
@@ -61,32 +61,35 @@ func main() {
 
 	servers, err := adminAPI.GetServers()
 	if err != nil {
-		log.Fatalf("cannot get servers: %v", err)
+		log.Fatalf("cannot get servers: %v\n", err)
 	}
 
 	createBackupBatch(&clientAPI, servers, 2)
 }
 
 func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs.Server) {
+	log.Printf("worker %v: started\n", id)
 	for server := range serverChan {
 		backup, err := clientAPI.CreateBackup(server.Attributes.Identifier, true)
 		if err != nil {
-			log.Printf("worker %v: cannot create backup for server %v: %v", id, server.Attributes.Name, err)
+			log.Printf("worker %v: cannot create backup for server %v: %v\n", id, server.Attributes.Name, err)
 		}
+		log.Printf("worker %v: backup %v for server %v started\n", id, backup.Attributes.UUID, server.Attributes.Name)
 
 		for range time.Tick(time.Second * 5) {
 			backupDetails, err := clientAPI.GetBackup(server.Attributes.Identifier, backup.Attributes.UUID)
 			if err != nil {
-				log.Printf("worker %v: cannot get backup %v details for server %v", id, backup.Attributes.UUID, server.Attributes.Name)
+				log.Printf("worker %v: cannot get backup %v for server %v\n", id, backup.Attributes.UUID, server.Attributes.Name)
 				return
 			}
 
 			if backupDetails.Attributes.Checksum != "" {
-				log.Printf("worker %v: backup %v for server %v completed", id, backupDetails.Attributes.UUID, server.Attributes.Name)
+				log.Printf("worker %v: backup %v for server %v completed\n", id, backup.Attributes.UUID, server.Attributes.Name)
 				break
 			}
 		}
 	}
+	log.Printf("worker %v: stopped\n", id)
 }
 
 func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, batchSize int) {
@@ -102,6 +105,7 @@ func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, ba
 		}(i)
 	}
 
+	log.Println("sending servers to workers")
 	for _, server := range servers {
 		if server.Attributes.FeatureLimits.Backups > 0 {
 			serverChan <- server
