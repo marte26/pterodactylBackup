@@ -96,9 +96,9 @@ func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, ba
 	for i := 0; i < batchSize; i++ {
 		wg.Add(1)
 
-		go func(i int) {
+		go func(seq int) {
 			defer wg.Done()
-			backupWorker(i, clientAPI, serverChan)
+			backupWorker(seq, clientAPI, serverChan)
 		}(i)
 	}
 
