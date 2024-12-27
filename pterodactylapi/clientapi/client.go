@@ -97,7 +97,7 @@ func (c *Client) CreateBackup(serverIdentifier string, purgeBackups bool) (struc
 	var backup structs.Backup
 
 	if purgeBackups {
-		server, err := c.ServerDetails(serverIdentifier)
+		server, err := c.GetServer(serverIdentifier)
 		if err != nil {
 			return backup, err
 		}
@@ -128,7 +128,7 @@ func (c *Client) CreateBackup(serverIdentifier string, purgeBackups bool) (struc
 	return backup, nil
 }
 
-func (c *Client) ServerDetails(serverIdentifier string) (structs.Server, error) {
+func (c *Client) GetServer(serverIdentifier string) (structs.Server, error) {
 	var server structs.Server
 
 	body, err := c.httpRequest("GET", "/servers/"+serverIdentifier)
@@ -153,7 +153,7 @@ func (c *Client) DeleteBackup(serverIdentifier string, backupUUID string) error 
 	return nil
 }
 
-func (c *Client) GetBackupDetails(serverIdentifier string, backupUUID string) (structs.Backup, error) {
+func (c *Client) GetBackup(serverIdentifier string, backupUUID string) (structs.Backup, error) {
 	var backup structs.Backup
 
 	body, err := c.httpRequest("GET", "/servers/"+serverIdentifier+"/backups/"+backupUUID)

@@ -75,7 +75,7 @@ func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs
 		}
 
 		for range time.Tick(time.Second * 5) {
-			backupDetails, err := clientAPI.GetBackupDetails(server.Attributes.Identifier, backup.Attributes.UUID)
+			backupDetails, err := clientAPI.GetBackup(server.Attributes.Identifier, backup.Attributes.UUID)
 			if err != nil {
 				log.Printf("worker %v: cannot get backup %v details for server %v", id, backup.Attributes.UUID, server.Attributes.Name)
 				return
