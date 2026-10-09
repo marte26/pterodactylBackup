@@ -77,6 +77,7 @@ func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs
 		backup, err := clientAPI.CreateBackup(server.Attributes.Identifier, true)
 		if err != nil {
 			log.Printf("worker %v: cannot create backup for server %v: %v\n", id, server.Attributes.Name, err)
+			return
 		}
 		log.Printf("worker %v: backup %v for server %v started\n", id, backup.Attributes.UUID, server.Attributes.Name)
 
