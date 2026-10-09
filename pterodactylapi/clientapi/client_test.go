@@ -108,12 +108,20 @@ func TestPruneBackups(t *testing.T) {
 			}
 			client := Client{URL: panel.Start(t)}
 
-			err := client.PruneBackups("s", tt.keep, tt.exclude)
+			deleted, err := client.PruneBackups("s", tt.keep, tt.exclude)
 			if tt.wantNoRoom != errors.Is(err, ErrNoRoom) || (!tt.wantNoRoom && err != nil) {
 				t.Fatalf("error = %v, want ErrNoRoom: %v", err, tt.wantNoRoom)
 			}
 			if backups := panel.Backups("s"); !slices.Equal(backups, tt.wantBackups) {
 				t.Errorf("backups = %v, want %v", backups, tt.wantBackups)
+			}
+
+			var panelDeleted []string
+			for _, event := range panel.Events() {
+				panelDeleted = append(panelDeleted, strings.TrimPrefix(event, "delete s/"))
+			}
+			if !slices.Equal(deleted, panelDeleted) {
+				t.Errorf("returned deleted = %v, panel deleted %v", deleted, panelDeleted)
 			}
 		})
 	}

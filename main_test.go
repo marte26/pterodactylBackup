@@ -1,8 +1,8 @@
 package main
 
 import (
-	"io"
-	"log"
+	"bytes"
+	"log/slog"
 	"net/http"
 	"os"
 	"slices"
@@ -18,7 +18,7 @@ import (
 func TestMain(m *testing.M) {
 	pollInterval = time.Millisecond
 	backupTimeout = 100 * time.Millisecond
-	log.SetOutput(io.Discard)
+	slog.SetDefault(slog.New(slog.DiscardHandler))
 
 	os.Exit(m.Run())
 }
@@ -107,14 +107,14 @@ func TestBackupServer(t *testing.T) {
 			limit:       1,
 			backups:     []fakepanel.Backup{locked(existing("old-1", 1))},
 			wantBackups: []string{"old-1"},
-			wantErr:     "cannot free a backup slot",
+			wantErr:     "free backup slot",
 		},
 		{
 			name:        "locked backups filling the limit: nothing is deleted",
 			limit:       2,
 			backups:     []fakepanel.Backup{locked(existing("old-1", 1)), locked(existing("old-2", 2)), existing("old-3", 3)},
 			wantBackups: []string{"old-1", "old-2", "old-3"},
-			wantErr:     "cannot free a backup slot",
+			wantErr:     "free backup slot",
 		},
 		{
 			name:  "in progress backups count but are not deleted",
@@ -143,7 +143,7 @@ func TestBackupServer(t *testing.T) {
 			failNewBackups: true,
 			wantEvents:     []string{"create s/new-1", "delete s/new-1"},
 			wantBackups:    []string{"old-1", "old-2"},
-			wantErr:        "failed and was deleted",
+			wantErr:        "failed on the panel and was deleted",
 		},
 		{
 			name:          "backup that never completes times out and keeps old ones",
@@ -152,7 +152,7 @@ func TestBackupServer(t *testing.T) {
 			neverComplete: true,
 			wantEvents:    []string{"create s/new-1"},
 			wantBackups:   []string{"old-1", "new-1"},
-			wantErr:       "did not complete",
+			wantErr:       "not completed within",
 		},
 		{
 			name:            "temporary poll errors are retried",
@@ -189,7 +189,7 @@ func TestBackupServer(t *testing.T) {
 			}
 			clientAPI := &clientapi.Client{URL: panel.Start(t)}
 
-			err := backupServer(0, clientAPI, newServer("s", tt.limit))
+			err := backupServer(slog.Default(), clientAPI, newServer("s", tt.limit))
 
 			if tt.wantErr == "" && err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -211,9 +211,10 @@ func TestCreateBackupBatch(t *testing.T) {
 	tests := []struct {
 		name           string
 		failNewBackups bool
-		wantFailed     int
+		wantSucceeded  int32
+		wantFailed     int32
 	}{
-		{name: "all succeed", wantFailed: 0},
+		{name: "all succeed", wantSucceeded: 4},
 		// more failures than workers used to leave no worker to receive the next server
 		{name: "all fail", failNewBackups: true, wantFailed: 4},
 	}
@@ -236,13 +237,19 @@ func TestCreateBackupBatch(t *testing.T) {
 				newServer("c", 2), installing, newServer("d", 2),
 			}
 
-			done := make(chan int)
+			done := make(chan *batchResult)
 			go func() { done <- createBackupBatch(clientAPI, servers, 2) }()
 
 			select {
-			case failed := <-done:
-				if failed != tt.wantFailed {
-					t.Errorf("failed = %d, want %d", failed, tt.wantFailed)
+			case result := <-done:
+				if got := result.succeeded.Load(); got != tt.wantSucceeded {
+					t.Errorf("succeeded = %d, want %d", got, tt.wantSucceeded)
+				}
+				if got := result.failed.Load(); got != tt.wantFailed {
+					t.Errorf("failed = %d, want %d", got, tt.wantFailed)
+				}
+				if got := result.skipped.Load(); got != 3 {
+					t.Errorf("skipped = %d, want 3", got)
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatal("createBackupBatch did not return")
@@ -263,5 +270,31 @@ func TestCreateBackupBatch(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBackupServerLogs(t *testing.T) {
+	panel := &fakepanel.Panel{Limits: map[string]int{"s": 2}}
+	panel.AddBackup("s", existing("old-1", 1))
+	clientAPI := &clientapi.Client{URL: panel.Start(t)}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	err := backupServer(logger.With("server", "s"), clientAPI, newServer("s", 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output := buf.String()
+	for _, want := range []string{
+		`level=INFO msg="backup started" server=s backup=new-1`,
+		`level=DEBUG msg="backup still running" server=s backup=new-1`,
+		`level=INFO msg="backup completed" server=s backup=new-1 bytes=0`,
+		`level=INFO msg="deleted old backup" server=s backup=old-1 reason=rotation`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("log output is missing %q:\n%s", want, output)
+		}
 	}
 }

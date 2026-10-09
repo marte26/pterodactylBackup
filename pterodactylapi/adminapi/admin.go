@@ -23,7 +23,7 @@ func (c *Client) httpRequest(method string, path string) ([]byte, error) {
 
 	req, err := http.NewRequest(method, c.URL+adminPath+path, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create HTTP request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
@@ -31,14 +31,14 @@ func (c *Client) httpRequest(method string, path string) ([]byte, error) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("send HTTP request: %w", err)
 	}
 
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read HTTP response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -61,7 +61,7 @@ func (c *Client) GetServers() ([]structs.Server, error) {
 
 		err = json.Unmarshal(body, &response)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode JSON response: %w", err)
 		}
 
 		servers = append(servers, response.Data...)
