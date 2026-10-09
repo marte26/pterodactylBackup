@@ -18,7 +18,11 @@ import (
 
 var commitHash = "unknown"
 
-const backupTimeout = 2 * time.Hour
+// variables so tests can shorten them
+var (
+	backupTimeout = 2 * time.Hour
+	pollInterval  = 5 * time.Second
+)
 
 type Config struct {
 	APIKey  string `mapstructure:"API_KEY"`
@@ -130,7 +134,7 @@ func backupServer(workerID int, clientAPI *clientapi.Client, server structs.Serv
 
 func waitForBackup(clientAPI *clientapi.Client, serverIdentifier string, backupUUID string) (structs.Backup, error) {
 	timeout := time.After(backupTimeout)
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
