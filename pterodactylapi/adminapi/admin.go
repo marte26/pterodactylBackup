@@ -52,7 +52,7 @@ func (c *Client) GetServers() ([]structs.Server, error) {
 	var servers []structs.Server
 
 	for page := 1; ; page++ {
-		body, err := c.httpRequest("GET", "/servers?page="+strconv.Itoa(page))
+		body, err := c.httpRequest("GET", "/servers?sort=id&page="+strconv.Itoa(page))
 		if err != nil {
 			return nil, err
 		}

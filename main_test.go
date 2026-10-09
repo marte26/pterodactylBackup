@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -48,14 +49,16 @@ func locked(backup fakepanel.Backup) fakepanel.Backup {
 
 func TestBackupServer(t *testing.T) {
 	tests := []struct {
-		name           string
-		limit          int
-		backups        []fakepanel.Backup
-		failNewBackups bool
-		neverComplete  bool
-		wantEvents     []string
-		wantBackups    []string
-		wantErr        string
+		name            string
+		limit           int
+		backups         []fakepanel.Backup
+		failNewBackups  bool
+		neverComplete   bool
+		pollErrors      int
+		pollErrorStatus int
+		wantEvents      []string
+		wantBackups     []string
+		wantErr         string
 	}{
 		{
 			name:        "free slot: create first, then delete the oldest",
@@ -65,9 +68,10 @@ func TestBackupServer(t *testing.T) {
 			wantBackups: []string{"old-2", "new-1"},
 		},
 		{
-			name:        "full server: free a slot once, then keep it free",
-			limit:       3,
-			backups:     []fakepanel.Backup{existing("old-1", 1), existing("old-2", 2), existing("old-3", 3)},
+			name:  "full server: free a slot once, then keep it free",
+			limit: 3,
+			// the panel does not sort backups, so neither does the fake
+			backups:     []fakepanel.Backup{existing("old-3", 3), existing("old-1", 1), existing("old-2", 2)},
 			wantEvents:  []string{"delete s/old-1", "create s/new-1", "delete s/old-2"},
 			wantBackups: []string{"old-3", "new-1"},
 		},
@@ -103,7 +107,14 @@ func TestBackupServer(t *testing.T) {
 			limit:       1,
 			backups:     []fakepanel.Backup{locked(existing("old-1", 1))},
 			wantBackups: []string{"old-1"},
-			wantErr:     "reached its limit",
+			wantErr:     "cannot free a backup slot",
+		},
+		{
+			name:        "locked backups filling the limit: nothing is deleted",
+			limit:       2,
+			backups:     []fakepanel.Backup{locked(existing("old-1", 1)), locked(existing("old-2", 2)), existing("old-3", 3)},
+			wantBackups: []string{"old-1", "old-2", "old-3"},
+			wantErr:     "cannot free a backup slot",
 		},
 		{
 			name:  "in progress backups count but are not deleted",
@@ -143,14 +154,35 @@ func TestBackupServer(t *testing.T) {
 			wantBackups:   []string{"old-1", "new-1"},
 			wantErr:       "did not complete",
 		},
+		{
+			name:            "temporary poll errors are retried",
+			limit:           3,
+			backups:         []fakepanel.Backup{existing("old-1", 1), existing("old-2", 2)},
+			pollErrors:      2,
+			pollErrorStatus: http.StatusBadGateway,
+			wantEvents:      []string{"create s/new-1", "delete s/old-1"},
+			wantBackups:     []string{"old-2", "new-1"},
+		},
+		{
+			name:            "backup that disappears stops waiting and keeps old ones",
+			limit:           3,
+			backups:         []fakepanel.Backup{existing("old-1", 1)},
+			pollErrors:      1,
+			pollErrorStatus: http.StatusNotFound,
+			wantEvents:      []string{"create s/new-1"},
+			wantBackups:     []string{"old-1", "new-1"},
+			wantErr:         "no longer exists",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			panel := &fakepanel.Panel{
-				Limits:         map[string]int{"s": tt.limit},
-				FailNewBackups: tt.failNewBackups,
-				NeverComplete:  tt.neverComplete,
+				Limits:          map[string]int{"s": tt.limit},
+				FailNewBackups:  tt.failNewBackups,
+				NeverComplete:   tt.neverComplete,
+				PollErrors:      tt.pollErrors,
+				PollErrorStatus: tt.pollErrorStatus,
 			}
 			for _, backup := range tt.backups {
 				panel.AddBackup("s", backup)
@@ -189,12 +221,19 @@ func TestCreateBackupBatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			panel := &fakepanel.Panel{
-				Limits:         map[string]int{"a": 2, "b": 2, "c": 2, "d": 2, "none": 0},
+				Limits:         map[string]int{"a": 2, "b": 2, "c": 2, "d": 2, "none": 0, "suspended": 2, "installing": 2},
 				FailNewBackups: tt.failNewBackups,
 			}
 			clientAPI := &clientapi.Client{URL: panel.Start(t)}
+
+			suspended := newServer("suspended", 2)
+			suspended.Attributes.Suspended = true
+			installing := newServer("installing", 2)
+			installing.Attributes.Status = "installing"
+
 			servers := []structs.Server{
-				newServer("a", 2), newServer("none", 0), newServer("b", 2), newServer("c", 2), newServer("d", 2),
+				newServer("a", 2), newServer("none", 0), newServer("b", 2), suspended,
+				newServer("c", 2), installing, newServer("d", 2),
 			}
 
 			done := make(chan int)
@@ -210,8 +249,10 @@ func TestCreateBackupBatch(t *testing.T) {
 			}
 
 			for _, event := range panel.Events() {
-				if strings.Contains(event, " none/") {
-					t.Errorf("server without backups allowed was touched: %v", event)
+				for _, skipped := range []string{"none", "suspended", "installing"} {
+					if strings.Contains(event, " "+skipped+"/") {
+						t.Errorf("skipped server was touched: %v", event)
+					}
 				}
 			}
 			if !tt.failNewBackups {

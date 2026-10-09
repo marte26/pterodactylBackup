@@ -1,6 +1,7 @@
 package clientapi
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -49,6 +50,7 @@ func TestPruneBackups(t *testing.T) {
 		keep        int
 		exclude     string
 		wantBackups []string
+		wantNoRoom  bool
 	}{
 		{
 			name:        "under the limit deletes nothing",
@@ -63,10 +65,23 @@ func TestPruneBackups(t *testing.T) {
 			wantBackups: []string{"b3"},
 		},
 		{
-			name:        "keep 0 deletes every unlocked backup",
+			name:        "keep 0 deletes every backup",
+			backups:     []fakepanel.Backup{backup("b2", 2), backup("b3", 3)},
+			keep:        0,
+			wantBackups: nil,
+		},
+		{
+			name:        "locked backups count but are not deleted",
+			backups:     []fakepanel.Backup{backup("b3", 3), lockedBackup, backup("b2", 2)},
+			keep:        1,
+			wantBackups: []string{"locked"},
+		},
+		{
+			name:        "deletes nothing when keep cannot be reached",
 			backups:     []fakepanel.Backup{lockedBackup, backup("b2", 2), backup("b3", 3)},
 			keep:        0,
-			wantBackups: []string{"locked"},
+			wantBackups: []string{"locked", "b2", "b3"},
+			wantNoRoom:  true,
 		},
 		{
 			name:        "excluded backup is kept even when oldest",
@@ -76,11 +91,12 @@ func TestPruneBackups(t *testing.T) {
 			wantBackups: []string{"b1", "b3"},
 		},
 		{
-			name:        "stops when only locked and excluded backups remain",
-			backups:     []fakepanel.Backup{lockedBackup, backup("b2", 2)},
+			name:        "excluded backup does not count as deletable",
+			backups:     []fakepanel.Backup{backup("b1", 1), backup("b2", 2)},
 			keep:        0,
 			exclude:     "b2",
-			wantBackups: []string{"locked", "b2"},
+			wantBackups: []string{"b1", "b2"},
+			wantNoRoom:  true,
 		},
 	}
 
@@ -93,8 +109,8 @@ func TestPruneBackups(t *testing.T) {
 			client := Client{URL: panel.Start(t)}
 
 			err := client.PruneBackups("s", tt.keep, tt.exclude)
-			if err != nil {
-				t.Fatal(err)
+			if tt.wantNoRoom != errors.Is(err, ErrNoRoom) || (!tt.wantNoRoom && err != nil) {
+				t.Fatalf("error = %v, want ErrNoRoom: %v", err, tt.wantNoRoom)
 			}
 			if backups := panel.Backups("s"); !slices.Equal(backups, tt.wantBackups) {
 				t.Errorf("backups = %v, want %v", backups, tt.wantBackups)
@@ -122,8 +138,10 @@ func TestGetBackupsHTTPError(t *testing.T) {
 	client := Client{URL: panel.Start(t), APIKey: "wrong"}
 
 	_, err := client.GetBackups("s")
-	if err == nil {
-		t.Fatal("expected an error")
+
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != 401 {
+		t.Fatalf("error = %v, want an HTTPError with status 401", err)
 	}
 	if !strings.Contains(err.Error(), "401") {
 		t.Errorf("error = %v, want it to mention status 401", err)

@@ -2,6 +2,7 @@ package clientapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,19 @@ type Client struct {
 }
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// ErrNoRoom is returned by PruneBackups when backups it may not delete alone exceed keep
+var ErrNoRoom = errors.New("not enough deletable backups")
+
+// HTTPError is returned when the panel responds with an unexpected status code
+type HTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("unexpected HTTP status %d: %s", e.StatusCode, e.Body)
+}
 
 func (c *Client) httpRequest(method string, path string) ([]byte, error) {
 	clientPath := "/api/client"
@@ -44,7 +58,7 @@ func (c *Client) httpRequest(method string, path string) ([]byte, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return nil, fmt.Errorf("unexpected HTTP status %d: %s", resp.StatusCode, body)
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	return body, nil
@@ -150,8 +164,8 @@ func (c *Client) GetBackups(serverIdentifier string) ([]structs.Backup, error) {
 }
 
 // PruneBackups deletes the oldest unlocked successful backups until at most keep
-// backups count towards the server's backup limit, or nothing deletable is left.
-// The backup with UUID exclude is never deleted.
+// backups count towards the server's backup limit. The backup with UUID exclude is
+// never deleted. If keep cannot be reached it deletes nothing and returns ErrNoRoom.
 func (c *Client) PruneBackups(serverIdentifier string, keep int, exclude string) error {
 	backups, err := c.GetBackups(serverIdentifier)
 	if err != nil {
@@ -170,6 +184,11 @@ func (c *Client) PruneBackups(serverIdentifier string, keep int, exclude string)
 		if backup.Attributes.IsSuccessful && !backup.Attributes.IsLocked && backup.Attributes.UUID != exclude {
 			deletable = append(deletable, backup)
 		}
+	}
+
+	// don't delete anything if it cannot free enough room anyway
+	if counted-len(deletable) > keep {
+		return fmt.Errorf("%w: %d locked or in progress backups, %d allowed", ErrNoRoom, counted-len(deletable), keep)
 	}
 
 	slices.SortFunc(deletable, func(a, b structs.Backup) int {

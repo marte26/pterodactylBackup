@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -123,9 +125,10 @@ func backupServer(workerID int, clientAPI *clientapi.Client, server structs.Serv
 	}
 	log.Printf("worker %v: backup %v for server %v completed\n", workerID, backup.Attributes.UUID, server.Attributes.Name)
 
-	// with a limit of 1 there is no slot to keep free, so keep the new backup
+	// with a limit of 1 there is no slot to keep free, so keep the new backup. If locked
+	// or in progress backups take the free slot, the next run frees one before creating.
 	err = clientAPI.PruneBackups(identifier, max(limit-1, 1), backup.Attributes.UUID)
-	if err != nil {
+	if err != nil && !errors.Is(err, clientapi.ErrNoRoom) {
 		return fmt.Errorf("cannot delete old backups: %w", err)
 	}
 
@@ -137,14 +140,30 @@ func waitForBackup(clientAPI *clientapi.Client, serverIdentifier string, backupU
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
+	var lastErr error
+
 	for {
 		select {
 		case <-timeout:
+			if lastErr != nil {
+				return structs.Backup{}, fmt.Errorf("backup %v did not complete within %v, last error: %w", backupUUID, backupTimeout, lastErr)
+			}
+
 			return structs.Backup{}, fmt.Errorf("backup %v did not complete within %v", backupUUID, backupTimeout)
 		case <-ticker.C:
 			backupDetails, err := clientAPI.GetBackup(serverIdentifier, backupUUID)
+
+			// the backup is gone, so there is nothing left to wait for
+			var httpErr *clientapi.HTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+				return backupDetails, fmt.Errorf("backup %v no longer exists: %w", backupUUID, err)
+			}
+
+			// keep polling through temporary errors until the timeout
 			if err != nil {
-				return backupDetails, fmt.Errorf("cannot get backup %v: %w", backupUUID, err)
+				log.Printf("cannot get backup %v, retrying: %v\n", backupUUID, err)
+				lastErr = err
+				continue
 			}
 
 			if !backupDetails.Attributes.CompletedAt.IsZero() {
@@ -171,11 +190,12 @@ func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, ba
 
 	log.Println("sending servers to workers")
 	for _, server := range servers {
-		if server.Attributes.FeatureLimits.Backups > 0 {
-			serverChan <- server
-		} else {
-			log.Printf("backups for server %v not allowed, skipping", server.Attributes.Name)
+		if reason := skipReason(server); reason != "" {
+			log.Printf("skipping server %v: %v", server.Attributes.Name, reason)
+			continue
 		}
+
+		serverChan <- server
 	}
 	close(serverChan)
 
@@ -184,4 +204,19 @@ func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, ba
 	log.Println("finished waiting for workers")
 
 	return int(failed.Load())
+}
+
+// skipReason returns why server cannot be backed up, or "" if it can
+func skipReason(server structs.Server) string {
+	switch {
+	case server.Attributes.FeatureLimits.Backups <= 0:
+		return "backups not allowed"
+	case server.Attributes.Suspended:
+		return "suspended"
+	// the panel refuses backups while a server is installing, restoring a backup and so on
+	case server.Attributes.Status != "":
+		return "status is " + server.Attributes.Status
+	}
+
+	return ""
 }

@@ -39,13 +39,21 @@ type Panel struct {
 	FailNewBackups bool
 	// NeverComplete keeps new backups in progress forever
 	NeverComplete bool
+	// PollErrors makes the first PollErrors requests for a single backup fail with PollErrorStatus
+	PollErrors      int
+	PollErrorStatus int
 
-	mu      sync.Mutex
-	backups map[string][]Backup
-	events  []string
-	nextID  int
-	clock   time.Time
+	mu          sync.Mutex
+	backups     map[string][]Backup
+	events      []string
+	nextID      int
+	clock       time.Time
+	polls       map[string]int
+	pollsFailed int
 }
+
+// pollsToComplete is how many times a new backup is polled before it completes
+const pollsToComplete = 3
 
 // Start serves the panel until the test ends and returns its URL
 func (p *Panel) Start(t testing.TB) string {
@@ -135,7 +143,8 @@ func (p *Panel) listBackups(w http.ResponseWriter, r *http.Request) {
 	defer p.mu.Unlock()
 
 	var objects []json.RawMessage
-	for _, backup := range p.sorted(r.PathValue("server")) {
+	// like the real panel, the list is not sorted
+	for _, backup := range p.backups[r.PathValue("server")] {
 		objects = append(objects, backupObject(backup))
 	}
 
@@ -180,6 +189,12 @@ func (p *Panel) getBackup(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.pollsFailed < p.PollErrors {
+		p.pollsFailed++
+		writeError(w, p.PollErrorStatus, "Injected poll error.")
+		return
+	}
+
 	server, uuid := r.PathValue("server"), r.PathValue("uuid")
 
 	i := slices.IndexFunc(p.backups[server], func(b Backup) bool { return b.UUID == uuid })
@@ -188,9 +203,13 @@ func (p *Panel) getBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// new backups finish the first time they are polled
+	if p.polls == nil {
+		p.polls = map[string]int{}
+	}
+	p.polls[uuid]++
+
 	backup := &p.backups[server][i]
-	if !backup.Completed && !p.NeverComplete {
+	if !backup.Completed && !p.NeverComplete && p.polls[uuid] >= pollsToComplete {
 		backup.Completed = true
 		backup.Successful = !p.FailNewBackups
 	}
