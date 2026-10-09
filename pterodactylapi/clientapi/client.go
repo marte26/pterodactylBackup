@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
+	"slices"
+	"strconv"
+	"time"
 
 	"github.com/marte26/pterodactylBackup/pterodactylapi/structs"
 )
@@ -16,16 +18,10 @@ type Client struct {
 	APIKey string
 }
 
-var clientPool = sync.Pool{
-	New: func() interface{} {
-		return &http.Client{}
-	},
-}
+var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 func (c *Client) httpRequest(method string, path string) ([]byte, error) {
 	clientPath := "/api/client"
-
-	client := clientPool.Get().(*http.Client)
 
 	req, err := http.NewRequest(method, c.URL+clientPath+path, nil)
 	if err != nil {
@@ -35,7 +31,7 @@ func (c *Client) httpRequest(method string, path string) ([]byte, error) {
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make HTTP request: %w", err)
 	}
@@ -48,28 +44,10 @@ func (c *Client) httpRequest(method string, path string) ([]byte, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return nil, fmt.Errorf(string(body))
+		return nil, fmt.Errorf("unexpected HTTP status %d: %s", resp.StatusCode, body)
 	}
-
-	clientPool.Put(client)
 
 	return body, nil
-}
-
-func getData(body []byte) ([]byte, error) {
-	var response structs.Response
-
-	err := json.Unmarshal(body, &response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal JSON response: %w", err)
-	}
-
-	data, err := json.Marshal(response.Data)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
 }
 
 func (c *Client) GetFiles(serverID string, path string) ([]structs.File, error) {
@@ -78,42 +56,18 @@ func (c *Client) GetFiles(serverID string, path string) ([]structs.File, error) 
 		return nil, err
 	}
 
-	data, err := getData(body)
+	var response structs.Response[structs.File]
+
+	err = json.Unmarshal(body, &response)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal JSON response: %w", err)
 	}
 
-	var files []structs.File
-
-	err = json.Unmarshal(data, &files)
-	if err != nil {
-		return nil, err
-	}
-
-	return files, nil
+	return response.Data, nil
 }
 
-func (c *Client) CreateBackup(serverIdentifier string, purgeBackups bool) (structs.Backup, error) {
+func (c *Client) CreateBackup(serverIdentifier string) (structs.Backup, error) {
 	var backup structs.Backup
-
-	if purgeBackups {
-		server, err := c.GetServer(serverIdentifier)
-		if err != nil {
-			return backup, err
-		}
-
-		backups, err := c.GetBackups(serverIdentifier)
-		if err != nil {
-			return backup, err
-		}
-
-		if len(backups) >= server.Attributes.FeatureLimits.Backups {
-			err := c.DeleteBackup(serverIdentifier, backups[0].Attributes.UUID)
-			if err != nil {
-				return backup, err
-			}
-		}
-	}
 
 	body, err := c.httpRequest("POST", "/servers/"+serverIdentifier+"/backups")
 	if err != nil {
@@ -170,22 +124,74 @@ func (c *Client) GetBackup(serverIdentifier string, backupUUID string) (structs.
 }
 
 func (c *Client) GetBackups(serverIdentifier string) ([]structs.Backup, error) {
-	body, err := c.httpRequest("GET", "/servers/"+serverIdentifier+"/backups")
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := getData(body)
-	if err != nil {
-		return nil, err
-	}
-
 	var backups []structs.Backup
 
-	err = json.Unmarshal(data, &backups)
-	if err != nil {
-		return nil, err
+	for page := 1; ; page++ {
+		body, err := c.httpRequest("GET", "/servers/"+serverIdentifier+"/backups?per_page=50&page="+strconv.Itoa(page))
+		if err != nil {
+			return nil, err
+		}
+
+		var response structs.Response[structs.Backup]
+
+		err = json.Unmarshal(body, &response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal JSON response: %w", err)
+		}
+
+		backups = append(backups, response.Data...)
+
+		if page >= response.Meta.Pagination.TotalPages {
+			break
+		}
 	}
 
 	return backups, nil
+}
+
+// PruneBackups deletes the oldest unlocked successful backups until at most keep
+// backups count towards the server's backup limit. The backup with UUID exclude is
+// never deleted.
+func (c *Client) PruneBackups(serverIdentifier string, keep int, exclude string) error {
+	backups, err := c.GetBackups(serverIdentifier)
+	if err != nil {
+		return err
+	}
+
+	// the panel counts successful and in progress backups towards the limit
+	var counted int
+	var deletable []structs.Backup
+
+	for _, backup := range backups {
+		if backup.Attributes.IsSuccessful || backup.Attributes.CompletedAt.IsZero() {
+			counted++
+		}
+
+		if backup.Attributes.IsSuccessful && !backup.Attributes.IsLocked && backup.Attributes.UUID != exclude {
+			deletable = append(deletable, backup)
+		}
+	}
+
+	slices.SortFunc(deletable, func(a, b structs.Backup) int {
+		return a.Attributes.CreatedAt.Compare(b.Attributes.CreatedAt)
+	})
+
+	for _, backup := range deletable {
+		if counted <= keep {
+			break
+		}
+
+		err := c.DeleteBackup(serverIdentifier, backup.Attributes.UUID)
+		if err != nil {
+			return fmt.Errorf("failed to delete backup %v: %w", backup.Attributes.UUID, err)
+		}
+
+		counted--
+	}
+
+	if counted > keep {
+		return fmt.Errorf("%d backups are locked or in progress, only %d allowed", counted, keep)
+	}
+
+	return nil
 }

@@ -2,10 +2,10 @@ package structs
 
 import "time"
 
-type Response struct {
-	Object string           `json:"object"`
-	Data   []map[string]any `json:"data"`
-	Meta   Meta             `json:"meta"`
+type Response[T any] struct {
+	Object string `json:"object"`
+	Data   []T    `json:"data"`
+	Meta   Meta   `json:"meta"`
 }
 
 type Meta struct {
@@ -21,22 +21,22 @@ type Meta struct {
 type Server struct {
 	Object     string `json:"object"`
 	Attributes struct {
-		ID          int    `json:"id"`
-		ExternalID  int    `json:"external_id"`
-		UUID        string `json:"uuid"`
-		Identifier  string `json:"identifier"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Status      string `json:"status"`
-		Suspended   bool   `json:"suspended"`
+		ID          int     `json:"id"`
+		ExternalID  *string `json:"external_id"`
+		UUID        string  `json:"uuid"`
+		Identifier  string  `json:"identifier"`
+		Name        string  `json:"name"`
+		Description string  `json:"description"`
+		Status      string  `json:"status"`
+		Suspended   bool    `json:"suspended"`
 		Limits      struct {
-			Memory      int  `json:"memory"`
-			Swap        int  `json:"swap"`
-			Disk        int  `json:"disk"`
-			IO          int  `json:"io"`
-			CPU         int  `json:"cpu"`
-			Threads     int  `json:"threads"`
-			OomDisabled bool `json:"oom_disabled"`
+			Memory      int     `json:"memory"`
+			Swap        int     `json:"swap"`
+			Disk        int     `json:"disk"`
+			IO          int     `json:"io"`
+			CPU         int     `json:"cpu"`
+			Threads     *string `json:"threads"`
+			OomDisabled bool    `json:"oom_disabled"`
 		} `json:"limits"`
 		FeatureLimits struct {
 			Databases   int `json:"databases"`
