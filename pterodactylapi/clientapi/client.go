@@ -150,8 +150,8 @@ func (c *Client) GetBackups(serverIdentifier string) ([]structs.Backup, error) {
 }
 
 // PruneBackups deletes the oldest unlocked successful backups until at most keep
-// backups count towards the server's backup limit. The backup with UUID exclude is
-// never deleted.
+// backups count towards the server's backup limit, or nothing deletable is left.
+// The backup with UUID exclude is never deleted.
 func (c *Client) PruneBackups(serverIdentifier string, keep int, exclude string) error {
 	backups, err := c.GetBackups(serverIdentifier)
 	if err != nil {
@@ -187,10 +187,6 @@ func (c *Client) PruneBackups(serverIdentifier string, keep int, exclude string)
 		}
 
 		counted--
-	}
-
-	if counted > keep {
-		return fmt.Errorf("%d backups are locked or in progress, only %d allowed", counted, keep)
 	}
 
 	return nil
