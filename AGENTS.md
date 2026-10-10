@@ -12,7 +12,9 @@ The Go toolchain comes from devenv (`devenv.nix`). Run commands inside `devenv s
 
 ## Layout
 
-- `main.go`: config loading, the worker pool and the backup flow (`backupServer`, `waitForBackup`, `createBackupBatch`, `skipReason`, `newestBackupAge`).
+- `main.go`: the entry point; sets up logging, loads the config, lists servers and runs the batch.
+- `config.go`: `Config` and `loadConfig`.
+- `backup.go`: the worker pool and the backup flow (`createBackupBatch`, `skipReason`, `backupWorker`, `newestBackupAge`, `backupServer`, `waitForBackup`), in call order.
 - `pterodactylapi/adminapi`: the application API (`/api/application`). Only used to list servers.
 - `pterodactylapi/clientapi`: the client API (`/api/client`) for backups, including `PruneBackups`.
 - `pterodactylapi/structs`: JSON types, including the generic `Response[T]` for list responses.
