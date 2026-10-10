@@ -15,7 +15,7 @@ import (
 	"github.com/marte26/pterodactylBackup/pterodactylapi/clientapi"
 	"github.com/marte26/pterodactylBackup/pterodactylapi/structs"
 
-	"github.com/spf13/viper"
+	"go.yaml.in/yaml/v3"
 )
 
 var commitHash = "unknown"
@@ -29,30 +29,42 @@ var (
 const workers = 2
 
 type Config struct {
-	APIKey   string `mapstructure:"API_KEY"`
-	BaseURL  string `mapstructure:"BASE_URL"`
-	LogLevel string `mapstructure:"LOG_LEVEL"`
+	APIKey   string `yaml:"api_key"`
+	BaseURL  string `yaml:"base_url"`
+	LogLevel string `yaml:"log_level"`
+	// servers whose newest successful backup is younger than this are skipped, 0 always backs up
+	MinBackupIntervalMinutes int `yaml:"min_backup_interval_minutes"`
 }
+
+const defaultMinBackupIntervalMinutes = 12 * 60
 
 // batchResult counts the outcome of a backup run, workers update it concurrently
 type batchResult struct {
 	succeeded, failed, skipped atomic.Int32
 }
 
-func loadEnv(path string) (config Config, err error) {
-	viper.AddConfigPath(path)
-	viper.SetConfigName("app")
-	viper.SetConfigType("env")
+// loadConfig reads app.yaml from dir, unknown keys are an error so typos don't go unnoticed
+func loadConfig(dir string) (config Config, err error) {
+	file, err := os.Open(filepath.Join(dir, "app.yaml"))
+	if err != nil {
+		return
+	}
+	defer file.Close()
 
-	viper.AutomaticEnv()
+	decoder := yaml.NewDecoder(file)
+	decoder.KnownFields(true)
 
-	err = viper.ReadInConfig()
+	// keys missing from the file keep these defaults
+	config.MinBackupIntervalMinutes = defaultMinBackupIntervalMinutes
 
+	err = decoder.Decode(&config)
 	if err != nil {
 		return
 	}
 
-	err = viper.Unmarshal(&config)
+	if config.MinBackupIntervalMinutes < 0 {
+		err = fmt.Errorf("min_backup_interval_minutes cannot be negative, got %d", config.MinBackupIntervalMinutes)
+	}
 
 	return
 }
@@ -68,7 +80,7 @@ func main() {
 		fatal("cannot determine executable path", "error", err)
 	}
 
-	config, err := loadEnv(filepath.Dir(exPath))
+	config, err := loadConfig(filepath.Dir(exPath))
 	if err != nil {
 		fatal("cannot load config", "error", err)
 	}
@@ -76,7 +88,7 @@ func main() {
 	if config.LogLevel != "" {
 		err := logLevel.UnmarshalText([]byte(config.LogLevel))
 		if err != nil {
-			fatal("invalid LOG_LEVEL", "value", config.LogLevel, "error", err)
+			fatal("invalid log_level", "value", config.LogLevel, "error", err)
 		}
 	}
 
@@ -93,9 +105,10 @@ func main() {
 	if err != nil {
 		fatal("cannot list servers", "error", err)
 	}
-	slog.Info("starting backups", "servers", len(servers), "workers", workers)
+	minInterval := time.Duration(config.MinBackupIntervalMinutes) * time.Minute
+	slog.Info("starting backups", "servers", len(servers), "workers", workers, "min_interval", minInterval)
 
-	result := createBackupBatch(&clientAPI, servers, workers)
+	result := createBackupBatch(&clientAPI, servers, workers, minInterval)
 
 	summary := []any{
 		"succeeded", result.succeeded.Load(),
@@ -114,12 +127,27 @@ func fatal(msg string, args ...any) {
 	os.Exit(1)
 }
 
-func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs.Server, result *batchResult) {
+func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs.Server, minInterval time.Duration, result *batchResult) {
 	logger := slog.With("worker", id)
 	logger.Debug("worker started")
 
 	for server := range serverChan {
 		serverLogger := logger.With("server", server.Attributes.Name, "server_id", server.Attributes.Identifier)
+
+		if minInterval > 0 {
+			age, found, err := newestBackupAge(clientAPI, server.Attributes.Identifier)
+			if err != nil {
+				serverLogger.Error("backup failed", "error", fmt.Errorf("check newest backup: %w", err))
+				result.failed.Add(1)
+				continue
+			}
+
+			if found && age < minInterval {
+				serverLogger.Info("skipping server", "reason", "recent backup", "age", age.Round(time.Minute))
+				result.skipped.Add(1)
+				continue
+			}
+		}
 
 		err := backupServer(serverLogger, clientAPI, server)
 		if err != nil {
@@ -132,6 +160,28 @@ func backupWorker(id int, clientAPI *clientapi.Client, serverChan <-chan structs
 	}
 
 	logger.Debug("worker stopped")
+}
+
+// newestBackupAge returns how old the newest successful backup of server is, found is false if it has none
+func newestBackupAge(clientAPI *clientapi.Client, serverIdentifier string) (age time.Duration, found bool, err error) {
+	backups, err := clientAPI.GetBackups(serverIdentifier)
+	if err != nil {
+		return 0, false, err
+	}
+
+	// failed and in progress backups are not usable, locked ones are
+	var newest time.Time
+	for _, backup := range backups {
+		if backup.Attributes.IsSuccessful && backup.Attributes.CreatedAt.After(newest) {
+			newest = backup.Attributes.CreatedAt
+		}
+	}
+
+	if newest.IsZero() {
+		return 0, false, nil
+	}
+
+	return time.Since(newest), true, nil
 }
 
 func backupServer(logger *slog.Logger, clientAPI *clientapi.Client, server structs.Server) error {
@@ -233,7 +283,7 @@ func waitForBackup(logger *slog.Logger, clientAPI *clientapi.Client, serverIdent
 }
 
 // createBackupBatch backs up servers with batchSize workers and returns how many succeeded, failed or were skipped
-func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, batchSize int) *batchResult {
+func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, batchSize int, minInterval time.Duration) *batchResult {
 	serverChan := make(chan structs.Server)
 	var wg sync.WaitGroup
 	var result batchResult
@@ -243,7 +293,7 @@ func createBackupBatch(clientAPI *clientapi.Client, servers []structs.Server, ba
 
 		go func() {
 			defer wg.Done()
-			backupWorker(i, clientAPI, serverChan, &result)
+			backupWorker(i, clientAPI, serverChan, minInterval, &result)
 		}()
 	}
 

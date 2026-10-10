@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -222,9 +225,10 @@ func TestCreateBackupBatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			panel := &fakepanel.Panel{
-				Limits:         map[string]int{"a": 2, "b": 2, "c": 2, "d": 2, "none": 0, "suspended": 2, "installing": 2},
+				Limits:         map[string]int{"a": 2, "b": 2, "c": 2, "d": 2, "none": 0, "suspended": 2, "installing": 2, "recent": 2},
 				FailNewBackups: tt.failNewBackups,
 			}
+			panel.AddBackup("recent", fakepanel.Backup{UUID: "recent-1", CreatedAt: time.Now().Add(-time.Hour), Successful: true, Completed: true})
 			clientAPI := &clientapi.Client{URL: panel.Start(t)}
 
 			suspended := newServer("suspended", 2)
@@ -234,11 +238,11 @@ func TestCreateBackupBatch(t *testing.T) {
 
 			servers := []structs.Server{
 				newServer("a", 2), newServer("none", 0), newServer("b", 2), suspended,
-				newServer("c", 2), installing, newServer("d", 2),
+				newServer("c", 2), installing, newServer("d", 2), newServer("recent", 2),
 			}
 
 			done := make(chan *batchResult)
-			go func() { done <- createBackupBatch(clientAPI, servers, 2) }()
+			go func() { done <- createBackupBatch(clientAPI, servers, 2, 12*time.Hour) }()
 
 			select {
 			case result := <-done:
@@ -248,15 +252,15 @@ func TestCreateBackupBatch(t *testing.T) {
 				if got := result.failed.Load(); got != tt.wantFailed {
 					t.Errorf("failed = %d, want %d", got, tt.wantFailed)
 				}
-				if got := result.skipped.Load(); got != 3 {
-					t.Errorf("skipped = %d, want 3", got)
+				if got := result.skipped.Load(); got != 4 {
+					t.Errorf("skipped = %d, want 4", got)
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatal("createBackupBatch did not return")
 			}
 
 			for _, event := range panel.Events() {
-				for _, skipped := range []string{"none", "suspended", "installing"} {
+				for _, skipped := range []string{"none", "suspended", "installing", "recent"} {
 					if strings.Contains(event, " "+skipped+"/") {
 						t.Errorf("skipped server was touched: %v", event)
 					}
@@ -296,5 +300,131 @@ func TestBackupServerLogs(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Errorf("log output is missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    Config
+		wantErr string
+	}{
+		{
+			name:    "all keys",
+			content: "api_key: key\nbase_url: https://panel.example.com\nlog_level: debug\nmin_backup_interval_minutes: 60\n",
+			want:    Config{APIKey: "key", BaseURL: "https://panel.example.com", LogLevel: "debug", MinBackupIntervalMinutes: 60},
+		},
+		{
+			name:    "min backup interval defaults to 12 hours",
+			content: "api_key: key\n",
+			want:    Config{APIKey: "key", MinBackupIntervalMinutes: 720},
+		},
+		{
+			name:    "min backup interval of 0 disables the check",
+			content: "min_backup_interval_minutes: 0\n",
+			want:    Config{MinBackupIntervalMinutes: 0},
+		},
+		{
+			name:    "negative min backup interval",
+			content: "min_backup_interval_minutes: -5\n",
+			wantErr: "cannot be negative",
+		},
+		{
+			name:    "unknown key",
+			content: "api_key: key\nbaseurl: https://panel.example.com\n",
+			wantErr: "field baseurl not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(tt.content), 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := loadConfig(dir)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("got error %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewestBackupAge(t *testing.T) {
+	now := time.Now()
+	backup := func(uuid string, age time.Duration, successful, completed, isLocked bool) fakepanel.Backup {
+		return fakepanel.Backup{UUID: uuid, CreatedAt: now.Add(-age), Successful: successful, Completed: completed, Locked: isLocked}
+	}
+
+	tests := []struct {
+		name      string
+		backups   []fakepanel.Backup
+		wantAge   time.Duration
+		wantFound bool
+	}{
+		{name: "no backups"},
+		{
+			name:      "newest of several, in any order",
+			backups:   []fakepanel.Backup{backup("old", 30*time.Hour, true, true, false), backup("new", 2*time.Hour, true, true, false), backup("mid", 10*time.Hour, true, true, false)},
+			wantAge:   2 * time.Hour,
+			wantFound: true,
+		},
+		{
+			name:      "locked backups count",
+			backups:   []fakepanel.Backup{backup("old", 30*time.Hour, true, true, false), backup("locked", time.Hour, true, true, true)},
+			wantAge:   time.Hour,
+			wantFound: true,
+		},
+		{
+			name:      "failed and in progress backups do not count",
+			backups:   []fakepanel.Backup{backup("old", 30*time.Hour, true, true, false), backup("failed", time.Hour, false, true, false), backup("running", 0, false, false, false)},
+			wantAge:   30 * time.Hour,
+			wantFound: true,
+		},
+		{
+			name:    "only failed backups",
+			backups: []fakepanel.Backup{backup("failed", time.Hour, false, true, false)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			panel := &fakepanel.Panel{}
+			for _, b := range tt.backups {
+				panel.AddBackup("s", b)
+			}
+			clientAPI := &clientapi.Client{URL: panel.Start(t)}
+
+			age, found, err := newestBackupAge(clientAPI, "s")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found != tt.wantFound {
+				t.Fatalf("found = %v, want %v", found, tt.wantFound)
+			}
+			// age is measured against the real clock, so allow for the time the test takes
+			if age < tt.wantAge || age > tt.wantAge+time.Minute {
+				t.Errorf("age = %v, want about %v", age, tt.wantAge)
+			}
+		})
+	}
+}
+
+func TestLoadConfigMissingFile(t *testing.T) {
+	_, err := loadConfig(t.TempDir())
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("got error %v, want fs.ErrNotExist", err)
 	}
 }

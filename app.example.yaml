@@ -1,0 +1,7 @@
+# copy to app.yaml next to the pterodactylBackup executable
+api_key: ptla_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+base_url: https://panel.example.com
+# debug, info, warn or error, defaults to info
+log_level: info
+# skip servers whose newest successful backup is younger than this, 0 always backs up, defaults to 720 (12 hours)
+min_backup_interval_minutes: 720
