@@ -1,5 +1,6 @@
 # copy to app.yaml next to the pterodactylBackup executable
-api_key: ptla_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# account API key of a root admin, application keys (ptla_) are rejected by the client API
+api_key: ptlc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 base_url: https://panel.example.com
 # debug, info, warn or error, defaults to info
 log_level: info
