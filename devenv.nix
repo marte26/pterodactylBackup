@@ -1,6 +1,4 @@
-{pkgs, ...}: {
-  packages = with pkgs; [gnumake];
-
+{...}: {
   languages.go = {
     enable = true;
     version = "1.27.1";
